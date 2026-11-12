@@ -240,6 +240,30 @@ end
 function NeverLose:IsCapturingKey(input)
  return self.IsBinding == true or (input ~= nil and input == self._LastBoundInput)
 end
+-- Compatibility for configs saved by older dropdown implementations.
+function NeverLose:NormalizeConfigValue(meta, value)
+    local config = meta.config or {}
+    if type(config.NormalizeValue) == "function" then
+        value = config.NormalizeValue(value)
+    end
+    if meta.kind == "Dropdown" and not config.Multi and type(value) == "table" then
+        local selected, count = nil, 0
+        for key, entry in pairs(value) do
+            local candidate
+            if type(key) == "number" and type(entry) == "string" then
+                candidate = entry
+            elseif type(key) == "string" and entry == true then
+                candidate = key
+            elseif not (type(key) == "string" and entry == false) then
+                return value -- Leave malformed data for the strict validator.
+            end
+            if candidate then selected = candidate; count = count + 1 end
+        end
+        if count == 1 then return selected end
+    end
+    return value
+end
+NeverLose.ConfigValueNormalizationVersion = 1
 function NeverLose:RegisterControl(flag, control, kind, config)
  self.Flags[flag] = control
  self._ControlOrder = (self._ControlOrder or 0) + 1
@@ -5729,8 +5753,9 @@ function NeverLose:CreateWindow(Config)
                     seen[row.Idx] = true
                     local control, meta = NeverLose.Flags[row.Idx], NeverLose.ControlMeta[row.Idx]
                     if control and meta then
-                        assert(valid(meta, row.Value), "Invalid value: " .. row.Idx)
-                        table.insert(ordered, {control = control, meta = meta, value = row.Value})
+                        local value = NeverLose:NormalizeConfigValue(meta, row.Value)
+                        if not valid(meta, value) then error("Invalid value: " .. row.Idx, 0) end
+                        table.insert(ordered, {control = control, meta = meta, value = value})
                     end -- Unknown legacy flags are intentionally ignored.
                 end
             end)
